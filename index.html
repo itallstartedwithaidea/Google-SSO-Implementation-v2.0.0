@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google SSO Implementation Demo</title>
+    <meta name="description" content="Enterprise-grade Google Single Sign-On implementation with RBAC">
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔐</text></svg>">
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Google Identity Services (Required for Google SSO) -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    
+    <style>
+        :root {
+            --primary: #a855f7;
+            --primary-dark: #9333ea;
+            --primary-light: #c084fc;
+            --bg-dark: #1e1b4b;
+            --bg-medium: #581c87;
+            --bg-light: #1e293b;
+            --text-primary: #ffffff;
+            --text-secondary: #e9d5ff;
+            --text-muted: #c4b5fd;
+            --success: #22c55e;
+            --warning: #f59e0b;
+            --error: #ef4444;
+            --border: rgba(255, 255, 255, 0.1);
+            --surface: rgba(0, 0, 0, 0.3);
+        }
+
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        html { scroll-behavior: smooth; }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, var(--bg-dark) 0%, var(--bg-medium) 50%, var(--bg-light) 100%);
+            min-height: 100vh;
+            color: var(--text-primary);
+        }
+
+        /* Login Modal */
+        .login-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.95);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 100000;
+            padding: 2rem;
+        }
+        
+        .login-modal.hidden { display: none; }
+
+        .login-content {
+            background: linear-gradient(135deg, var(--bg-dark) 0%, var(--bg-medium) 100%);
+            border-radius: 24px;
+            padding: 3rem 2.5rem;
+            max-width: 420px;
+            width: 100%;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            text-align: center;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+
+        .login-content h2 {
+            font-size: 1.75rem;
+            margin-bottom: 0.75rem;
+            color: #ffffff;
+            font-weight: 700;
+        }
+
+        .login-content p {
+            color: var(--text-secondary);
+            margin-bottom: 2rem;
+            font-size: 0.95rem;
+            line-height: 1.5;
+        }
+
+        /* Custom Google Sign-in Button (Demo Mode) */
+        .google-signin-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            padding: 14px 32px;
+            background: #ffffff;
+            border: 2px solid #dadce0;
+            border-radius: 8px;
+            color: #3c4043;
+            font-family: 'Google Sans', 'Inter', sans-serif;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            min-width: 240px;
+        }
+
+        .google-signin-btn:hover {
+            background: #f8f9fa;
+            border-color: #c6c9cc;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+        }
+
+        .google-signin-btn img {
+            width: 20px;
+            height: 20px;
+        }
+
+        #google-signin-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 50px;
+        }
+
+        /* Header */
+        .site-header {
+            background: var(--surface);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border);
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+
+        .site-logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-size: 1.25rem;
+            font-weight: 700;
+            text-decoration: none;
+            color: var(--text-primary);
+        }
+
+        .site-logo-icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--primary) 0%, #ec4899 100%);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .user-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border: 2px solid var(--primary);
+        }
+
+        .user-details { text-align: right; }
+        .user-name { font-weight: 600; font-size: 0.9rem; }
+        .user-type { font-size: 0.75rem; color: var(--text-muted); }
+        .user-type.corporate { color: var(--success); }
+        .user-type.admin { color: #f59e0b; font-weight: 600; }
+
+        .admin-btn {
+            padding: 0.5rem 1rem;
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 0.875rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .admin-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(245, 158, 11, 0.4);
+        }
+
+        .logout-btn {
+            padding: 0.5rem 1rem;
+            background: transparent;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 0.875rem;
+            transition: all 0.3s ease;
+        }
+
+        .logout-btn:hover {
+            background: rgba(239, 68, 68, 0.2);
+            border-color: var(--error);
+            color: #fca5a5;
+        }
+
+        /* Main Content */
+        .main-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .welcome-section {
+            text-align: center;
+            padding: 4rem 2rem;
+        }
+
+        .welcome-section h1 {
+            font-size: 3rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+            background: linear-gradient(135deg, #fff 0%, var(--primary-light) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .welcome-section p {
+            font-size: 1.25rem;
+            color: var(--text-secondary);
+            max-width: 600px;
+            margin: 0 auto 2rem;
+            line-height: 1.6;
+        }
+
+        /* Feature Cards */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+            margin-top: 3rem;
+        }
+
+        .feature-card {
+            background: var(--surface);
+            backdrop-filter: blur(12px);
+            border-radius: 16px;
+            padding: 2rem;
+            border: 1px solid var(--border);
+            transition: all 0.3s ease;
+        }
+
+        .feature-card:hover {
+            border-color: var(--primary);
+            transform: translateY(-4px);
+        }
+
+        .feature-icon {
+            width: 48px;
+            height: 48px;
+            background: linear-gradient(135deg, var(--primary) 0%, #ec4899 100%);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .feature-card h3 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: var(--text-primary);
+        }
+
+        .feature-card p {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+            line-height: 1.5;
+        }
+
+        /* User Dashboard */
+        .dashboard {
+            background: var(--surface);
+            backdrop-filter: blur(12px);
+            border-radius: 24px;
+            padding: 2rem;
+            border: 1px solid var(--border);
+            margin-top: 2rem;
+        }
+
+        .dashboard h2 {
+            font-size: 1.5rem;
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+
+        .info-item {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 1rem;
+            border-radius: 12px;
+        }
+
+        .info-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.25rem;
+        }
+
+        .info-value {
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        /* Permissions Display */
+        .permissions-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 0.75rem;
+            margin-top: 1rem;
+        }
+
+        .permission-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            font-size: 0.875rem;
+        }
+
+        .permission-item.allowed {
+            background: rgba(34, 197, 94, 0.2);
+            color: #86efac;
+        }
+
+        .permission-item.denied {
+            background: rgba(239, 68, 68, 0.2);
+            color: #fca5a5;
+        }
+
+        /* Footer */
+        .site-footer {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-muted);
+            font-size: 0.875rem;
+            border-top: 1px solid var(--border);
+            margin-top: 4rem;
+        }
+
+        .site-footer a {
+            color: var(--primary);
+            text-decoration: none;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .site-header { padding: 1rem; flex-wrap: wrap; gap: 1rem; }
+            .site-logo span { display: none; }
+            .user-details { display: none; }
+            .welcome-section h1 { font-size: 2rem; }
+            .welcome-section p { font-size: 1rem; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Login Modal -->
+    <div id="login-modal" class="login-modal">
+        <div class="login-content">
+            <div style="font-size: 4rem; margin-bottom: 1rem;">🔐</div>
+            <h2>Welcome!</h2>
+            <p>Sign in with your Google account to access the application</p>
+            <div id="google-signin-container">
+                <!-- Google renders button here, or fallback to demo button -->
+                <button class="google-signin-btn" id="google-signin-btn">
+                    <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google">
+                    Sign in with Google
+                </button>
+            </div>
+            <p style="margin-top: 1.5rem; font-size: 0.8rem; color: var(--text-muted);">
+                Corporate emails get team sharing access
+            </p>
+        </div>
+    </div>
+
+    <!-- Header -->
+    <header class="site-header">
+        <a href="/" class="site-logo">
+            <div class="site-logo-icon">🔐</div>
+            <span>Google SSO Demo</span>
+        </a>
+        <div class="header-right">
+            <div class="user-info">
+                <img id="user-avatar" class="user-avatar" src="" alt="Avatar" style="display: none;">
+                <div class="user-details">
+                    <div id="user-name" class="user-name"></div>
+                    <div id="user-type" class="user-type"></div>
+                </div>
+            </div>
+            <button id="admin-btn" class="admin-btn" style="display: none;">⚙️ Admin</button>
+            <button id="logout-btn" class="logout-btn" style="display: none;">Logout</button>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Welcome Section (Shown when logged in) -->
+        <section class="welcome-section" id="welcome-section">
+            <h1>Google SSO Implementation</h1>
+            <p>Enterprise-grade Single Sign-On with role-based access control, corporate domain detection, and comprehensive user management.</p>
+        </section>
+
+        <!-- User Dashboard (Shown when logged in) -->
+        <section class="dashboard" id="user-dashboard" style="display: none;">
+            <h2>👤 Your Session</h2>
+            <div class="info-grid" id="session-info">
+                <!-- Populated by JavaScript -->
+            </div>
+            
+            <h3 style="margin-top: 2rem; margin-bottom: 1rem;">🔐 Your Permissions</h3>
+            <div class="permissions-grid" id="permissions-grid">
+                <!-- Populated by JavaScript -->
+            </div>
+        </section>
+
+        <!-- Features Section -->
+        <section class="features-grid" id="features-section">
+            <div class="feature-card">
+                <div class="feature-icon">🔑</div>
+                <h3>Google OAuth 2.0</h3>
+                <p>Secure authentication using Google's Identity Services. No passwords to manage.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">👥</div>
+                <h3>Role-Based Access</h3>
+                <p>Admin, Editor, and Viewer roles with granular permission controls.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🏢</div>
+                <h3>Domain Detection</h3>
+                <p>Automatically identify corporate users and enable team features.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">📊</div>
+                <h3>Activity Logging</h3>
+                <p>Complete audit trail of user logins and actions.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">⚙️</div>
+                <h3>Admin Dashboard</h3>
+                <p>Manage users, roles, domains, and settings from one place.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">💾</div>
+                <h3>Zero Backend</h3>
+                <p>100% client-side implementation. Works with any static host.</p>
+            </div>
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+        <p>Google SSO Implementation v2.0.0 • 
+           <a href="https://github.com/itallstartedwithaidea" target="_blank">GitHub</a> •
+           <a href="https://www.itallstartedwithaidea.com" target="_blank">itallstartedwithaidea</a>
+        </p>
+    </footer>
+
+    <!-- Configuration (Load First) -->
+    <script src="auth-config.js"></script>
+    
+    <!-- Authentication Module -->
+    <script src="auth.js"></script>
+    
+    <!-- Application Logic -->
+    <script>
+    (function() {
+        'use strict';
+
+        // DOM Elements
+        const elements = {
+            loginModal: document.getElementById('login-modal'),
+            userAvatar: document.getElementById('user-avatar'),
+            userName: document.getElementById('user-name'),
+            userType: document.getElementById('user-type'),
+            adminBtn: document.getElementById('admin-btn'),
+            logoutBtn: document.getElementById('logout-btn'),
+            userDashboard: document.getElementById('user-dashboard'),
+            sessionInfo: document.getElementById('session-info'),
+            permissionsGrid: document.getElementById('permissions-grid'),
+            welcomeSection: document.getElementById('welcome-section'),
+            featuresSection: document.getElementById('features-section')
+        };
+
+        // Update UI based on session
+        function updateUI(session) {
+            if (session) {
+                // Hide login modal
+                elements.loginModal.classList.add('hidden');
+                
+                // Show user info
+                if (session.picture) {
+                    elements.userAvatar.src = session.picture;
+                    elements.userAvatar.style.display = 'block';
+                }
+                elements.userName.textContent = session.name;
+                
+                const typeLabels = {
+                    admin: '👑 Admin',
+                    corporate: '🏢 Corporate',
+                    personal: '👤 Personal'
+                };
+                const roleLabels = {
+                    admin: ' (Admin)',
+                    editor: ' (Editor)',
+                    viewer: ' (Viewer)'
+                };
+                
+                elements.userType.textContent = (typeLabels[session.userType] || session.userType) + 
+                    (session.role !== session.userType ? (roleLabels[session.role] || '') : '');
+                elements.userType.className = `user-type ${session.userType}`;
+                
+                // Show/hide admin button
+                elements.adminBtn.style.display = session.role === 'admin' ? 'block' : 'none';
+                elements.logoutBtn.style.display = 'block';
+                
+                // Show dashboard
+                elements.userDashboard.style.display = 'block';
+                
+                // Populate session info
+                elements.sessionInfo.innerHTML = `
+                    <div class="info-item">
+                        <div class="info-label">Email</div>
+                        <div class="info-value">${session.email}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Name</div>
+                        <div class="info-value">${session.name}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">User Type</div>
+                        <div class="info-value" style="text-transform: capitalize;">${session.userType}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Role</div>
+                        <div class="info-value" style="text-transform: capitalize;">${session.role}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Team Access</div>
+                        <div class="info-value">${session.canAccessTeam ? 'Yes' : 'No'}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Login Time</div>
+                        <div class="info-value">${new Date(session.loginTime).toLocaleString()}</div>
+                    </div>
+                `;
+                
+                // Populate permissions
+                const permissions = [
+                    { name: 'View Content', key: 'view' },
+                    { name: 'Upload', key: 'upload' },
+                    { name: 'Edit', key: 'edit' },
+                    { name: 'Delete', key: 'delete' },
+                    { name: 'Team Access', key: 'team_access' },
+                    { name: 'Manage Users', key: 'manage_users' }
+                ];
+                
+                elements.permissionsGrid.innerHTML = permissions.map(p => {
+                    const allowed = GoogleSSO.hasPermission(p.key);
+                    return `
+                        <div class="permission-item ${allowed ? 'allowed' : 'denied'}">
+                            ${allowed ? '✓' : '✗'} ${p.name}
+                        </div>
+                    `;
+                }).join('');
+                
+            } else {
+                // Show login modal
+                elements.loginModal.classList.remove('hidden');
+                elements.userAvatar.style.display = 'none';
+                elements.userName.textContent = '';
+                elements.userType.textContent = '';
+                elements.adminBtn.style.display = 'none';
+                elements.logoutBtn.style.display = 'none';
+                elements.userDashboard.style.display = 'none';
+            }
+        }
+
+        // Event Listeners
+        elements.logoutBtn.addEventListener('click', () => GoogleSSO.signOut());
+        
+        elements.adminBtn.addEventListener('click', () => {
+            alert('Admin Dashboard would open here.\n\nThis demo shows the authentication system.\nSee the full implementation for the complete admin dashboard.');
+        });
+
+        // Listen for auth events
+        window.addEventListener('gss:login', (e) => {
+            console.log('User logged in:', e.detail);
+            updateUI(e.detail);
+        });
+
+        window.addEventListener('gss:logout', () => {
+            console.log('User logged out');
+            updateUI(null);
+        });
+
+        window.addEventListener('gss:error', (e) => {
+            console.error('Auth error:', e.detail);
+            alert(e.detail.error || 'Authentication error occurred');
+        });
+
+        // Initialize
+        function init() {
+            const session = GoogleSSO.getSession();
+            updateUI(session);
+            
+            // Initialize Google Sign-In if not logged in
+            if (!session) {
+                GoogleSSO.initGoogleSignIn({
+                    buttonContainer: document.getElementById('google-signin-container'),
+                    theme: 'outline',
+                    size: 'large'
+                });
+            }
+        }
+
+        // Wait for DOM and Google Identity Services
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+        } else {
+            init();
+        }
+    })();
+    </script>
+</body>
+</html>
+
